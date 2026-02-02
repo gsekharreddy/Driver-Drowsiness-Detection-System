@@ -1,0 +1,533 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Safety System (Python Connected)</title>
+    <style>
+        :root {
+            --bg-color: #F7F8FC;
+            --primary: #FFA500;
+            --secondary: #1E90FF;
+            --text: #333;
+        }
+        body {
+            margin: 0;
+            background-color: var(--bg-color);
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .dashboard {
+            width: 100%;
+            padding: 20px;
+            background: white;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+        .status-badge {
+            font-size: 1.5rem;
+            font-weight: bold;
+            padding: 10px 20px;
+            border-radius: 8px;
+            background: #eee;
+        }
+        .connection-dot {
+            height: 12px; width: 12px;
+            background-color: #ccc;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .connected { background-color: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
+        .disconnected { background-color: #e74c3c; }
+
+        #simulation-container {
+            flex-grow: 1;
+            width: 100%;
+            position: relative;
+            background: #333;
+        }
+        canvas { width: 100%; height: 100%; display: block; }
+
+        .overlay-alert {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 0, 0, 0.9);
+            color: white;
+            padding: 30px;
+            border-radius: 20px;
+            font-size: 2.5rem;
+            font-weight: bold;
+            display: none;
+            animation: pulse 0.5s infinite;
+        }
+        @keyframes pulse { 50% { transform: translate(-50%, -50%) scale(1.1); } }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard">
+        <div>
+            <h2 style="margin:0; color:var(--secondary)">SafeDrive <span style="font-weight:300">Python Link</span></h2>
+            <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">
+                <span id="connDot" class="connection-dot disconnected"></span>
+                <span id="connText">Waiting for Python Server...</span>
+            </div>
+        </div>
+        
+        <div id="statusBadge" class="status-badge" style="color: #666">NO DATA</div>
+    </div>
+
+    <div id="simulation-container">
+        <canvas id="roadCanvas"></canvas>
+        <div id="alertOverlay" class="overlay-alert">⚠️ EMERGENCY STOP ⚠️</div>
+    </div>
+
+    <script>
+        // --- GAME STATE ---
+        const CAR = { x: 0, speed: 100, color: '#FFA500' };
+        let systemState = "NORMAL"; // NORMAL, DROWSY, SLEEP, PARKED
+        let drift = 0;
+        let roadOffset = 0;
+        let lastTime = 0;
+        
+        // --- WEBSOCKET CONNECTION ---
+        const connDot = document.getElementById('connDot');
+        const connText = document.getElementById('connText');
+        const statusBadge = document.getElementById('statusBadge');
+        let socket;
+
+        function connect() {
+            // Attempt to connect to the Python script
+            socket = new WebSocket('ws://localhost:8765');
+
+            socket.onopen = () => {
+                console.log("Connected to Python!");
+                connDot.className = "connection-dot connected";
+                connText.innerText = "Connected to Python Brain";
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleInput(data);
+            };
+
+            socket.onclose = () => {
+                console.log("Disconnected.");
+                connDot.className = "connection-dot disconnected";
+                connText.innerText = "Disconnected. Run Python script!";
+                // Try reconnecting every 3 seconds
+                setTimeout(connect, 3000);
+            };
+        }
+        
+        // Start connection logic
+        connect();
+
+        // --- LOGIC ---
+        function handleInput(data) {
+            // data.status will be NORMAL, DROWSY, or SLEEP
+            // data.score is 0.0 to 1.0
+            
+            if (systemState === "PARKED") return; // Once parked, stay parked
+
+            if (data.status === "NORMAL") {
+                systemState = "NORMAL";
+                statusBadge.innerText = "👁️ AWAKE (" + (data.score * 100).toFixed(0) + "%)";
+                statusBadge.style.color = "#2ecc71";
+                statusBadge.style.background = "#e8f8f5";
+                document.getElementById('alertOverlay').style.display = 'none';
+                
+                // Recovery logic
+                if (CAR.speed < 100) CAR.speed += 2;
+                if (CAR.x > 0.1) CAR.x -= 0.05;
+                if (CAR.x < -0.1) CAR.x += 0.05;
+
+            } else if (data.status === "DROWSY") {
+                systemState = "DROWSY";
+                statusBadge.innerText = "🥱 DROWSY";
+                statusBadge.style.color = "#FFA500";
+                statusBadge.style.background = "#fef9e7";
+                
+                // Sway effect
+                drift += 0.1;
+                CAR.x += Math.sin(drift) * 0.02;
+
+            } else if (data.status === "SLEEP") {
+                systemState = "SLEEP";
+                statusBadge.innerText = "😴 SLEEP DETECTED";
+                statusBadge.style.color = "#e74c3c";
+                statusBadge.style.background = "#fdedec";
+                document.getElementById('alertOverlay').style.display = 'block';
+            }
+        }
+
+        // --- RENDER LOOP ---
+        const canvas = document.getElementById('roadCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resize() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function loop(timestamp) {
+            const dt = (timestamp - lastTime) / 1000;
+            lastTime = timestamp;
+
+            updatePhysics(dt);
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        function updatePhysics(dt) {
+            // Move Road
+            if (CAR.speed > 0) {
+                roadOffset += CAR.speed * dt * 5;
+                if (roadOffset > 40) roadOffset = 0;
+            }
+
+            // Autonomous Parking Logic (Same as before)
+            if (systemState === "SLEEP") {
+                // Decelerate
+                if (CAR.speed > 0) CAR.speed -= 30 * dt;
+                else {
+                    CAR.speed = 0;
+                    systemState = "PARKED";
+                    statusBadge.innerText = "🛑 EMERGENCY PARKED";
+                }
+
+                // Pull over to left (-0.7)
+                if (CAR.x > -0.7) CAR.x -= 0.5 * dt;
+            }
+        }
+
+        function draw() {
+            // Simple Draw Code (Stripped down for brevity)
+            ctx.fillStyle = '#34495e';
+            ctx.fillRect(0,0,canvas.width, canvas.height); // Sky
+            
+            ctx.fillStyle = '#27ae60';
+            ctx.fillRect(0, canvas.height/2, canvas.width, canvas.height/2); // Grass
+
+            // Road
+            const w = canvas.width; const h = canvas.height;
+            const mid = w/2; const hor = h/2;
+            
+            ctx.beginPath(); ctx.fillStyle = '#555';
+            ctx.moveTo(mid - w*0.05, hor); ctx.lineTo(mid + w*0.05, hor);
+            ctx.lineTo(mid + w*0.4, h); ctx.lineTo(mid - w*0.4, h);
+            ctx.fill();
+
+            // Dashed Line
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath();
+            for(let i=0; i<10; i++) {
+                let y = hor + (h-hor)/10 * i + roadOffset;
+                if(y>h) y -= (h-hor);
+                if(y>hor) {
+                    // Simple perspective
+                    let scale = (y-hor)/(h-hor);
+                    let dw = 2 + scale*8; 
+                    ctx.fillStyle='white'; ctx.fillRect(mid-dw/2, y, dw, 10 + scale*20);
+                }
+            }
+            
+            // Car
+            const carX = mid + (CAR.x * (w*0.4));
+            const carY = h - 120;
+            drawCar(ctx, carX, carY, CAR.color);
+        }
+
+        function drawCar(ctx, x, y, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x-30, y-50, 60, 100); // Body
+            ctx.fillStyle = '#333';
+            ctx.fillRect(x-25, y-30, 50, 20); // Window
+            if(systemState === "SLEEP" || systemState === "PARKED") {
+                ctx.fillStyle = 'red';
+                ctx.shadowBlur = 10; ctx.shadowColor = 'red';
+            } else {
+                ctx.fillStyle = '#800';
+                ctx.shadowBlur = 0;
+            }
+            ctx.fillRect(x-25, y+40, 15, 5); // Lights
+            ctx.fillRect(x+10, y+40, 15, 5);
+            ctx.shadowBlur = 0;
+        }
+
+        requestAnimationFrame(loop);
+    </script>
+</body>
+</html> -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeDrive AI Monitor</title>
+    <style>
+        :root { --bg: #F7F8FC; --primary: #FFA500; --danger: #e74c3c; --success: #2ecc71; }
+        body { margin: 0; background-color: var(--bg); font-family: 'Segoe UI', sans-serif; height: 100vh; display: flex; flex-direction: column; }
+        
+        .main-container {
+            display: flex;
+            flex: 1;
+            height: 100%;
+        }
+
+        /* LEFT PANEL: Camera & Stats */
+        .camera-panel {
+            flex: 1;
+            background: #1a1a1a;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            border-right: 2px solid #333;
+        }
+
+        .video-feed {
+            width: 100%;
+            max-width: 640px;
+            border-radius: 12px;
+            border: 4px solid #444;
+            margin-bottom: 20px;
+            transform: scaleX(-1); /* Mirror effect */
+        }
+
+        .stats-box {
+            width: 100%;
+            max-width: 640px;
+            background: #333;
+            padding: 15px;
+            border-radius: 12px;
+        }
+
+        .meter-label { display: flex; justify-content: space-between; margin-bottom: 5px; font-weight: bold; }
+        .progress-bg { width: 100%; height: 20px; background: #555; border-radius: 10px; overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--success); width: 0%; transition: width 0.1s linear, background 0.2s; }
+
+        /* RIGHT PANEL: Simulation */
+        .sim-panel {
+            flex: 1;
+            position: relative;
+            background: #333;
+        }
+        canvas { width: 100%; height: 100%; display: block; }
+        
+        .overlay-alert {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(231, 76, 60, 0.95); color: white; padding: 40px;
+            border-radius: 20px; font-size: 3rem; font-weight: 900; display: none;
+            animation: pulse 0.5s infinite; text-align: center;
+            box-shadow: 0 0 50px rgba(231, 76, 60, 0.5);
+        }
+        @keyframes pulse { 50% { transform: translate(-50%, -50%) scale(1.1); } }
+        
+        .status-badge {
+            position: absolute; top: 20px; right: 20px;
+            background: rgba(255,255,255,0.9); color: #333;
+            padding: 10px 20px; border-radius: 8px; font-weight: bold; font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <!-- LEFT: Real-world Input -->
+        <div class="camera-panel">
+            <h2 style="margin-top:0">Driver View</h2>
+            <img id="camFeed" class="video-feed" src="" alt="Waiting for server...">
+            
+            <div class="stats-box">
+                <div class="meter-label">
+                    <span>Eyes Open Probability</span>
+                    <span id="awakePct">0%</span>
+                </div>
+                <div class="progress-bg">
+                    <div id="awakeBar" class="progress-fill"></div>
+                </div>
+                
+                <div class="meter-label" style="margin-top: 15px;">
+                    <span>Eyes Closed Probability</span>
+                    <span id="sleepPct">0%</span>
+                </div>
+                <div class="progress-bg">
+                    <div id="sleepBar" class="progress-fill" style="background: var(--danger)"></div>
+                </div>
+            </div>
+            <p id="connStatus" style="color: #aaa; margin-top: 10px; font-size: 0.8rem;">Disconnected</p>
+        </div>
+
+        <!-- RIGHT: Simulation -->
+        <div class="sim-panel">
+            <div class="status-badge" id="carStatus">PARKED</div>
+            <canvas id="roadCanvas"></canvas>
+            <div id="alertOverlay" class="overlay-alert">
+                <div>⚠️ EMERGENCY</div>
+                <div style="font-size: 1.5rem; margin-top: 10px;">DRIVER UNRESPONSIVE</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- WEBSOCKET & UI LOGIC ---
+        const imgElement = document.getElementById('camFeed');
+        const awakeBar = document.getElementById('awakeBar');
+        const sleepBar = document.getElementById('sleepBar');
+        const awakePct = document.getElementById('awakePct');
+        const sleepPct = document.getElementById('sleepPct');
+        const connStatus = document.getElementById('connStatus');
+        const carStatus = document.getElementById('carStatus');
+        
+        let socket;
+        function connect() {
+            socket = new WebSocket('ws://localhost:8765');
+            
+            socket.onopen = () => {
+                connStatus.innerText = "✅ Connected to RTX 2050";
+                connStatus.style.color = "#2ecc71";
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                // 1. Update Video
+                imgElement.src = "data:image/jpeg;base64," + data.image;
+
+                // 2. Update Stats (data.score is probability of Sleep)
+                const sleepProb = data.score * 100;
+                const awakeProb = (1.0 - data.score) * 100;
+
+                awakeBar.style.width = awakeProb + "%";
+                awakePct.innerText = awakeProb.toFixed(1) + "%";
+                
+                sleepBar.style.width = sleepProb + "%";
+                sleepPct.innerText = sleepProb.toFixed(1) + "%";
+
+                // 3. Update Car Logic
+                handleCarInput(data.status);
+            };
+
+            socket.onclose = () => {
+                connStatus.innerText = "❌ Disconnected. Retrying...";
+                connStatus.style.color = "#e74c3c";
+                setTimeout(connect, 2000);
+            };
+        }
+        connect();
+
+        // --- CAR SIMULATION LOGIC ---
+        const CAR = { x: 0, speed: 100, color: '#FFA500' };
+        let systemState = "NORMAL";
+        let drift = 0;
+        let roadOffset = 0;
+
+        function handleCarInput(status) {
+            if (systemState === "PARKED") return;
+
+            if (status === "NORMAL") {
+                systemState = "NORMAL";
+                document.getElementById('alertOverlay').style.display = 'none';
+                carStatus.innerText = "DRIVING";
+                carStatus.style.color = "green";
+                
+                // Recovery
+                if(CAR.speed < 100) CAR.speed += 2;
+                if(CAR.x > 0.1) CAR.x -= 0.05;
+                if(CAR.x < -0.1) CAR.x += 0.05;
+
+            } else if (status === "DROWSY") {
+                systemState = "DROWSY";
+                carStatus.innerText = "WARNING: DROWSY";
+                carStatus.style.color = "orange";
+                
+                // Drift
+                drift += 0.2;
+                CAR.x += Math.sin(drift) * 0.03;
+
+            } else if (status === "SLEEP") {
+                systemState = "SLEEP";
+                carStatus.innerText = "CRITICAL: SLEEP";
+                carStatus.style.color = "red";
+                document.getElementById('alertOverlay').style.display = 'block';
+            }
+        }
+
+        // --- RENDER LOOP (Simplified) ---
+        const canvas = document.getElementById('roadCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resize() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function loop() {
+            // Physics
+            if (CAR.speed > 0) roadOffset = (roadOffset + CAR.speed * 0.05) % 40;
+            
+            if (systemState === "SLEEP") {
+                if (CAR.speed > 0) CAR.speed -= 2; // Brake
+                if (CAR.x > -0.7) CAR.x -= 0.01; // Pull over
+                if (CAR.speed <= 0) {
+                    CAR.speed = 0;
+                    systemState = "PARKED";
+                    carStatus.innerText = "EMERGENCY PARKED";
+                }
+            }
+
+            // Draw
+            const w = canvas.width, h = canvas.height;
+            ctx.fillStyle = '#34495e'; ctx.fillRect(0,0,w,h); // Sky
+            ctx.fillStyle = '#27ae60'; ctx.fillRect(0,h/2,w,h/2); // Grass
+            
+            // Road
+            ctx.beginPath(); ctx.fillStyle = '#555';
+            ctx.moveTo(w/2 - w*0.1, h/2); ctx.lineTo(w/2 + w*0.1, h/2);
+            ctx.lineTo(w/2 + w*0.5, h); ctx.lineTo(w/2 - w*0.5, h);
+            ctx.fill();
+
+            // Lines
+            ctx.fillStyle = 'white';
+            for(let i=0; i<10; i++) {
+                let y = (h/2) + ((h/2)/10 * i + roadOffset) % (h/2);
+                let scale = (y - h/2)/(h/2);
+                let dw = 2 + scale*10;
+                if(y > h/2) ctx.fillRect(w/2 - dw/2, y, dw, 10 + scale*20);
+            }
+
+            // Car
+            let cx = w/2 + CAR.x * (w*0.5);
+            let cy = h - 100;
+            ctx.fillStyle = CAR.color; ctx.fillRect(cx-25, cy-40, 50, 80); // Body
+            ctx.fillStyle = '#333'; ctx.fillRect(cx-20, cy-20, 40, 20); // Window
+            if (systemState === "SLEEP" || systemState === "PARKED") {
+                ctx.fillStyle = 'red'; ctx.shadowBlur = 20; ctx.shadowColor = 'red';
+            } else {
+                ctx.fillStyle = '#800'; ctx.shadowBlur = 0;
+            }
+            ctx.fillRect(cx-20, cy+30, 10, 5); ctx.fillRect(cx+10, cy+30, 10, 5); // Lights
+            ctx.shadowBlur = 0;
+
+            requestAnimationFrame(loop);
+        }
+        loop();
+    </script>
+</body>
+</html>
