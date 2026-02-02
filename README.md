@@ -157,11 +157,19 @@ Drive safely! (Or close your eyes to watch the car crash). 🚗💥
 # 📂 Project Structure
 
 safedrive-ai/
-├── data/                   # Dataset (Train/Val/Test)
+
+├── data/                    # Dataset (Train/Val/Test)
+
 ├── drowsiness_model_gpu.pth # Trained Model Weights
+
 ├── drive_server_gpu.py     # Python Backend (WebSockets + Inference)
-├── pytorch_drowsiness.py   # Training Script
-├── dashboard_video.html    # Frontend Interface
+
+├── Train.ipynb.py   # Training Script
+
+├── dashboard.html    # Frontend Interface
+
+├── Verification.ipynb #Test if your GPU is compatable for Accelerated HardwareTraining
+
 └── README.md               # You are here
 
 
