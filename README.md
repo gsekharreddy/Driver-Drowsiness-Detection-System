@@ -164,11 +164,11 @@ safedrive-ai/
 
 ├── drive_server_gpu.py     # Python Backend (WebSockets + Inference)
 
-├── Train.ipynb.py   # Training Script
+├── Train.ipynb   # Training Script
 
 ├── dashboard.html    # Frontend Interface
 
-├── Verification.ipynb #Test if your GPU is compatable for Accelerated HardwareTraining
+├── Verification.ipynb #Test if your GPU is compatible for Accelerated Hardware Training
 
 └── README.md               # You are here
 
